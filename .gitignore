@@ -46,3 +46,10 @@ yarn-error.*
 
 .vscode
 .idea
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+env

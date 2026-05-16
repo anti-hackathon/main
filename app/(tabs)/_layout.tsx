@@ -1,57 +1,37 @@
-import React from 'react';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
-import { useColorScheme } from '@/components/useColorScheme';
-
-function TabBarIcon(props: {
-  name: React.ComponentProps<typeof FontAwesome>['name'];
-  color: string;
-}) {
-  return <FontAwesome size={20} style={{ marginBottom: -3 }} {...props} />;
-}
+import { MaterialIcons } from '@expo/vector-icons';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colorScheme === 'dark' ? '#fff' : '#000',
+        tabBarStyle: {
+          backgroundColor: '#1e293b', // slate-800
+          borderTopColor: '#334155', // slate-700
+        },
+        tabBarActiveTintColor: '#38bdf8', // sky-400
+        tabBarInactiveTintColor: '#64748b', // slate-500
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Dashboard',
-          tabBarIcon: ({ color }) => <TabBarIcon name="map" color={color} />,
+          title: 'Map',
+          tabBarIcon: ({ color }) => <MaterialIcons name="map" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="signals"
+        name="dashboard"
         options={{
-          title: 'Signals',
-          tabBarIcon: ({ color }) => <TabBarIcon name="feed" color={color} />,
+          title: 'Signal',
+          tabBarIcon: ({ color }) => <MaterialIcons name="cell-tower" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="analysis"
+        name="profile"
         options={{
-          title: 'Analysis',
-          tabBarIcon: ({ color }) => <TabBarIcon name="bar-chart" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="response"
-        options={{
-          title: 'Response',
-          tabBarIcon: ({ color }) => <TabBarIcon name="play-circle" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="logs"
-        options={{
-          title: 'Logs',
-          tabBarIcon: ({ color }) => <TabBarIcon name="terminal" color={color} />,
+          title: 'Profile',
+          tabBarIcon: ({ color }) => <MaterialIcons name="person" size={24} color={color} />,
         }}
       />
     </Tabs>

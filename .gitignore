@@ -53,3 +53,5 @@ __pycache__/
 *.pyc
 .env
 env
+
+app-logs-ee256-firebase-adminsdk-fbsvc-1dd4266dd5.json

@@ -25,3 +25,14 @@ export const initFirebaseAdmin = () => {
 };
 
 export const db = () => admin.firestore();
+
+export const verifyUserToken = async (idToken: string) => {
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    console.error('Error verifying Firebase ID token:', error);
+    throw error;
+  }
+};
+

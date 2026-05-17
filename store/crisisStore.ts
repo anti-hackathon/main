@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import { CrisisCategory, CrisisStatus, PlanStatus, SeverityLevel } from '../constants/role3Theme';
 
-export type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export { SeverityLevel };
 
 export interface Signal {
   id: string;
@@ -15,38 +16,57 @@ export interface Signal {
 
 export interface Crisis {
   id: string;
-  type: string;
-  location: string;
-  severity: Severity;
-  confidence_score: number;
-  affected_area_km2: number;
-  estimated_affected_people: number;
-  reasoning: string;
-  corroborating_signals: string[];
-  coordinates?: { lat: number; lng: number };
+  title: string;
+  category: CrisisCategory;
+  description: string;
+  status: CrisisStatus;
+  timestamp: string;
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  severity: SeverityLevel;
+  affectedAreaKm2?: number;
+  estimatedAffectedPeople?: number;
+  reasoning?: string;
+  corroboratingSignals?: string[];
 }
 
 export interface ResponseAction {
-  action_id: string;
-  type: string;
+  actionId: string;
   description: string;
-  responsible_agency: string;
-  estimated_time_minutes: number;
-  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
 }
 
 export interface AlternateRoute {
   from: string;
   to: string;
   via: string;
-  estimated_delay_reduction: number;
+  impactMinutes: number;
 }
 
 export interface ResponsePlan {
-  crisis_id: string;
-  priority: string;
+  crisisId: string;
+  status: PlanStatus;
+  summary: string;
+  estimatedResponseTime: number;
+  teams: Array<{
+    role: string;
+    area: string;
+    eta: number;
+  }>;
   actions: ResponseAction[];
-  alternate_routes: AlternateRoute[];
+  alternateRoutes: AlternateRoute[];
+  simulation?: {
+    congestionReductionPct: number;
+    routesUpdated: number;
+    responseTimeMinutes: number;
+    timeline: Array<{
+      minute: number;
+      label: string;
+      status: string;
+    }>;
+  };
 }
 
 interface CrisisState {
@@ -54,10 +74,16 @@ interface CrisisState {
   signals: Signal[];
   crises: Crisis[];
   responsePlan: ResponsePlan | null;
+  responsePlans: Record<string, ResponsePlan>;
+  selectedCrisisId: string | null;
+  recentlySubmittedCrisisId: string | null;
   addRawSignal: (signal: any) => void;
   setSignals: (signals: Signal[]) => void;
   setCrises: (crises: Crisis[]) => void;
+  upsertCrisis: (crisis: Crisis) => void;
   setResponsePlan: (plan: ResponsePlan) => void;
+  setSelectedCrisis: (crisisId: string | null) => void;
+  markRecentlySubmitted: (crisisId: string | null) => void;
   clearAll: () => void;
 }
 
@@ -66,9 +92,24 @@ export const useCrisisStore = create<CrisisState>((set) => ({
   signals: [],
   crises: [],
   responsePlan: null,
+  responsePlans: {},
+  selectedCrisisId: null,
+  recentlySubmittedCrisisId: null,
   addRawSignal: (signal) => set((state) => ({ rawSignals: [...state.rawSignals, signal] })),
   setSignals: (signals) => set({ signals }),
   setCrises: (crises) => set({ crises }),
-  setResponsePlan: (plan) => set({ responsePlan: plan }),
-  clearAll: () => set({ rawSignals: [], signals: [], crises: [], responsePlan: null }),
+  upsertCrisis: (crisis) => set((state) => {
+    const exists = state.crises.some((c) => c.id === crisis.id);
+    const updatedCrises = exists
+      ? state.crises.map((c) => (c.id === crisis.id ? crisis : c))
+      : [crisis, ...state.crises];
+    return { crises: updatedCrises };
+  }),
+  setResponsePlan: (plan) => set((state) => ({
+    responsePlan: plan,
+    responsePlans: { ...state.responsePlans, [plan.crisisId]: plan }
+  })),
+  setSelectedCrisis: (crisisId) => set({ selectedCrisisId: crisisId }),
+  markRecentlySubmitted: (crisisId) => set({ recentlySubmittedCrisisId: crisisId }),
+  clearAll: () => set({ rawSignals: [], signals: [], crises: [], responsePlan: null, responsePlans: {}, selectedCrisisId: null, recentlySubmittedCrisisId: null }),
 }));

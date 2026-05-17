@@ -1,11 +1,11 @@
 // Role3 | Bottom sheet for browsing agent reasoning steps filtered to a selected crisis
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { LoadingPulse } from './LoadingPulse';
-import { SlidingSheet } from './SlidingSheet';
-import { AgentTrace } from './AgentTrace';
 import { ROLE3_COLORS } from '../constants/role3Theme';
 import { useAgentStore } from '../store/agentStore';
+import { AgentTrace } from './AgentTrace';
+import { LoadingPulse } from './LoadingPulse';
+import { SlidingSheet } from './SlidingSheet';
 
 interface ReasoningSheetProps {
   visible: boolean;
@@ -24,6 +24,14 @@ export const ReasoningSheet = ({ visible, onClose, crisisId }: ReasoningSheetPro
   return (
     <SlidingSheet visible={visible} onClose={onClose} title="AI Reasoning Feed">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        {isLoading ? (
+          <View style={styles.antigravityActiveBanner}>
+            <Text style={styles.antigravityActiveText}>
+              🌌 Antigravity Core: Orchestrating metropolitan intelligence...
+            </Text>
+          </View>
+        ) : null}
+
         {isLoading && (!log || log.steps.length === 0) ? <LoadingPulse /> : null}
 
         {!isLoading && (!log || log.steps.length === 0) ? (
@@ -47,6 +55,22 @@ const styles = StyleSheet.create({
   content: {
     gap: 14,
     paddingBottom: 8,
+  },
+  antigravityActiveBanner: {
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.35)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  antigravityActiveText: {
+    color: '#60A5FA',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   emptyState: {
     backgroundColor: ROLE3_COLORS.surfaceSoft,

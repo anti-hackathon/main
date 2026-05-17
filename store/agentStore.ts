@@ -2,37 +2,45 @@ import { create } from 'zustand';
 
 export type AgentStatus = 'PENDING' | 'RUNNING' | 'COMPLETE' | 'FAILED';
 
-export interface AgentLog {
+export interface AgentLogStep {
   id: string;
   agentName: string;
   status: AgentStatus;
-  durationMs?: number;
+  action: string;
+  reasoning: string;
   inputSummary?: string;
   outputSummary?: string;
-  reasoning?: string[];
   rawJson?: any;
+}
+
+export interface AgentLog {
+  crisisId: string;
+  steps: AgentLogStep[];
 }
 
 interface AgentStoreState {
   logs: AgentLog[];
-  executionLogs: string[];
-  initPipeline: (agents: string[]) => void;
-  updateAgentLog: (agentName: string, updates: Partial<AgentLog>) => void;
-  addExecutionLog: (message: string) => void;
+  pipelineStatus: 'idle' | 'running' | 'complete' | 'failed';
+  activeCrisisId: string | null;
+  antigravityCoreStatus: 'idle' | 'initializing' | 'orchestrating' | 'done' | 'failed';
+  setPipelineStatus: (status: 'idle' | 'running' | 'complete' | 'failed') => void;
+  setAntigravityCoreStatus: (status: 'idle' | 'initializing' | 'orchestrating' | 'done' | 'failed') => void;
+  setActiveCrisisId: (crisisId: string | null) => void;
+  replaceLog: (log: AgentLog) => void;
   clearLogs: () => void;
 }
 
 export const useAgentStore = create<AgentStoreState>((set) => ({
   logs: [],
-  executionLogs: [],
-  initPipeline: (agents) => set({
-    logs: agents.map(name => ({ id: name, agentName: name, status: 'PENDING' }))
+  pipelineStatus: 'idle',
+  activeCrisisId: null,
+  antigravityCoreStatus: 'idle',
+  setPipelineStatus: (status) => set({ pipelineStatus: status }),
+  setAntigravityCoreStatus: (status) => set({ antigravityCoreStatus: status }),
+  setActiveCrisisId: (crisisId) => set({ activeCrisisId: crisisId }),
+  replaceLog: (log) => set((state) => {
+    const filtered = state.logs.filter((l) => l.crisisId !== log.crisisId);
+    return { logs: [...filtered, log] };
   }),
-  updateAgentLog: (agentName, updates) => set((state) => ({
-    logs: state.logs.map(log => log.agentName === agentName ? { ...log, ...updates } : log)
-  })),
-  addExecutionLog: (message) => set((state) => ({
-    executionLogs: [...state.executionLogs, `[${new Date().toLocaleTimeString()}] ${message}`]
-  })),
-  clearLogs: () => set({ logs: [], executionLogs: [] }),
+  clearLogs: () => set({ logs: [], pipelineStatus: 'idle', activeCrisisId: null, antigravityCoreStatus: 'idle' }),
 }));

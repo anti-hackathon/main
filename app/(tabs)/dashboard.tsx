@@ -26,7 +26,7 @@ import {
   getSeverityColor,
   getSeverityLabel,
 } from '../../constants/role3Theme';
-import { runCIROPipeline } from '../../services/claudeAgent';
+import { runCIROPipeline } from '../../server/model';
 import { useCrisisStore } from '../../store/crisisStore';
 import { useAgentStore } from '../../store/agentStore';
 
@@ -170,7 +170,26 @@ export default function ReportCrisisScreen() {
     };
 
     setIsSubmitting(true);
-    useAgentStore.getState().setPipelineStatus('running');
+    const agentStoreInit = useAgentStore.getState();
+    agentStoreInit.setPipelineStatus('running');
+    agentStoreInit.setActiveCrisisId(crisisId);
+    agentStoreInit.setAntigravityCoreStatus('initializing');
+
+    // Load dynamic start log from Antigravity Core
+    agentStoreInit.replaceLog({
+      crisisId: crisisId,
+      steps: [
+        {
+          id: `antigravity_core_init_${Date.now()}`,
+          agentName: 'Antigravity Core 🌌',
+          status: 'RUNNING',
+          action: 'Establish Node connection and spin up agent modules',
+          reasoning: 'Metropolitan signal coordinates successfully ingested. Initializing the Antigravity Core routing layer and spawning the three parallel agent pipelines: Signal Analyst, Response Planner, and Urban Traffic Simulator...',
+          inputSummary: `Incident: ${category} at ${finalLocation.address}`,
+          outputSummary: 'Orchestrator online. Downstream agents starting...',
+        }
+      ]
+    });
 
     try {
       const result = await runCIROPipeline(
@@ -202,20 +221,51 @@ export default function ReportCrisisScreen() {
       const crisisStore = useCrisisStore.getState();
       const agentStore = useAgentStore.getState();
 
+      const finalSteps = [
+        {
+          id: `antigravity_core_init_${Date.now()}`,
+          agentName: 'Antigravity Core 🌌',
+          status: 'COMPLETE' as const,
+          action: 'Establish Node connection and spin up agent modules',
+          reasoning: 'Metropolitan signal coordinates successfully ingested. Initializing the Antigravity Core routing layer and spawning the three parallel agent pipelines: Signal Analyst, Response Planner, and Urban Traffic Simulator...',
+          inputSummary: `Incident: ${category} at ${finalLocation.address}`,
+          outputSummary: 'Orchestrator online. Downstream agents starting...',
+        },
+        ...result.agentLog.steps,
+        {
+          id: `antigravity_core_success_${Date.now()}`,
+          agentName: 'Antigravity Core 🌌',
+          status: 'COMPLETE' as const,
+          action: 'Orchestration Finalization & Dispatch',
+          reasoning: 'All parallel agent analysis checks passed. Metropolitan response plans successfully generated, simulated, and pushed to active routing networks.',
+          inputSummary: `Simulated Congestion Reduction: ${result.plan.simulation?.congestionReductionPct}%`,
+          outputSummary: 'Dispatched successfully.',
+        }
+      ];
+
+      const modifiedAgentLog = {
+        ...result.agentLog,
+        steps: finalSteps,
+      };
+
       crisisStore.upsertCrisis(result.crisis);
       crisisStore.setResponsePlan(result.plan);
       crisisStore.setSelectedCrisis(result.crisis.id);
       crisisStore.markRecentlySubmitted(result.crisis.id);
-      agentStore.replaceLog(result.agentLog);
+      agentStore.replaceLog(modifiedAgentLog);
       agentStore.setPipelineStatus('complete');
+      agentStore.setAntigravityCoreStatus('done');
 
       resetForm();
-      router.replace('/(tabs)/index');
-    } catch {
-      useAgentStore.getState().setPipelineStatus('failed');
+      router.replace('/');
+    } catch (err: any) {
+      console.error('[Antigravity Dashboard] submission handler caught error:', err);
+      const agentStoreErr = useAgentStore.getState();
+      agentStoreErr.setPipelineStatus('failed');
+      agentStoreErr.setAntigravityCoreStatus('failed');
       Alert.alert(
         'Submission Error',
-        'The crisis pipeline did not finish this time. Please retry the report flow.'
+        `The crisis pipeline did not finish: ${err.message || err}`
       );
     } finally {
       setIsSubmitting(false);

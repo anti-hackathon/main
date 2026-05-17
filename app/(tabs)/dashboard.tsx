@@ -1,148 +1,715 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Platform } from 'react-native';
-import Constants from 'expo-constants';
-import { useCrisisStore, Crisis } from '../../store/crisisStore';
+// Role3 | Upgraded the signal form into a full multi-step crisis report flow wired to the mock agent pipeline
+import React, { useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  CATEGORY_OPTIONS,
+  CrisisCategory,
+  ROLE3_COLORS,
+  SeverityLevel,
+  formatAddressFallback,
+  getSeverityColor,
+  getSeverityLabel,
+} from '../../constants/role3Theme';
+import { runCIROPipeline } from '../../services/claudeAgent';
+import { useCrisisStore } from '../../store/crisisStore';
+import { useAgentStore } from '../../store/agentStore';
 
-export default function DashboardScreen() {
-  const [signal, setSignal] = useState('');
-  const [loading, setLoading] = useState(false);
-  const addCrisis = useCrisisStore(state => state.setCrises);
-  const currentCrises = useCrisisStore(state => state.crises);
+const STEP_LABELS = ['Category', 'Details', 'Photo', 'Location', 'Severity', 'Review'];
+
+interface DraftLocation {
+  lat: number;
+  lng: number;
+  address: string;
+}
+
+const DEFAULT_LOCATION: DraftLocation = {
+  lat: 33.6844,
+  lng: 73.0479,
+  address: 'G-10 Markaz, Islamabad',
+};
+
+export default function ReportCrisisScreen() {
+  const router = useRouter();
+  const [stepIndex, setStepIndex] = useState(0);
+  const [category, setCategory] = useState<CrisisCategory | null>(null);
+  const [description, setDescription] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | undefined>();
+  const [location, setLocation] = useState<DraftLocation>(DEFAULT_LOCATION);
+  const [severity, setSeverity] = useState<SeverityLevel>(3);
+  const [isPickingImage, setIsPickingImage] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const canContinue = useMemo(() => {
+    switch (stepIndex) {
+      case 0:
+        return Boolean(category);
+      case 1:
+        return description.trim().length >= 12;
+      case 2:
+        return true;
+      case 3:
+        return Boolean(location.address.trim());
+      case 4:
+        return true;
+      default:
+        return Boolean(category && description.trim() && location.address.trim());
+    }
+  }, [category, description, location.address, stepIndex]);
+
+  const resetForm = () => {
+    setStepIndex(0);
+    setCategory(null);
+    setDescription('');
+    setPhotoUri(undefined);
+    setLocation(DEFAULT_LOCATION);
+    setSeverity(3);
+  };
+
+  const useSampleScenario = () => {
+    setCategory('Flood');
+    setDescription(
+      'Flash flooding is building near G-10 Markaz. Cars are stalled in standing water and traffic is no longer moving.'
+    );
+    setLocation(DEFAULT_LOCATION);
+    setSeverity(5);
+    setStepIndex(5);
+  };
+
+  const handlePickImage = async () => {
+    setIsPickingImage(true);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Photo Permission', 'Allow photo access to attach a field image to the report.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: true,
+        quality: 0.75,
+        aspect: [4, 3],
+      });
+
+      if (!result.canceled && result.assets.length > 0) {
+        setPhotoUri(result.assets[0].uri);
+      }
+    } catch {
+      Alert.alert('Photo Error', 'The image picker could not open right now.');
+    } finally {
+      setIsPickingImage(false);
+    }
+  };
+
+  const handleLocate = async () => {
+    setIsLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Location Permission', 'Allow location access or type the area manually.');
+        return;
+      }
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const reverse = await Location.reverseGeocodeAsync({
+        latitude: current.coords.latitude,
+        longitude: current.coords.longitude,
+      });
+
+      const addressParts = reverse[0]
+        ? [reverse[0].name, reverse[0].district, reverse[0].city, reverse[0].region].filter(Boolean)
+        : [];
+
+      setLocation({
+        lat: current.coords.latitude,
+        lng: current.coords.longitude,
+        address:
+          addressParts.join(', ') ||
+          formatAddressFallback(current.coords.latitude, current.coords.longitude),
+      });
+    } catch {
+      Alert.alert(
+        'Location Error',
+        'Current location could not be resolved. You can still type the address manually.'
+      );
+    } finally {
+      setIsLocating(false);
+    }
+  };
 
   const handleSubmit = async () => {
-    if (!signal) {
-      Alert.alert('Empty Signal', 'Please input a localized crisis signal.');
+    if (!category) {
       return;
     }
 
-    setLoading(true);
+    const crisisId = `crisis_${Date.now()}`;
+    const timestamp = new Date().toISOString();
+    const finalLocation = {
+      lat: location.lat,
+      lng: location.lng,
+      address: location.address.trim() || formatAddressFallback(location.lat, location.lng),
+    };
+
+    setIsSubmitting(true);
+    useAgentStore.getState().setPipelineStatus('running');
+
     try {
-      // Dynamically determine the local IP if running in Expo development
-      let API_URL = 'http://localhost:3000/api/signal'; // Default for web/iOS sim
-      
-      if (process.env.EXPO_PUBLIC_API_URL) {
-        API_URL = process.env.EXPO_PUBLIC_API_URL;
-      } else {
-        const debuggerHost = Constants.expoConfig?.hostUri;
-        if (debuggerHost) {
-          const ip = debuggerHost.split(':')[0]; // Extract IP address
-          API_URL = `http://${ip}:3000/api/signal`;
-        } else if (Platform.OS === 'android') {
-          API_URL = 'http://10.0.2.2:3000/api/signal'; // Android Emulator fallback
+      const result = await runCIROPipeline(
+        [
+          {
+            id: `mobile_${crisisId}`,
+            source: 'Mobile Report',
+            text: `${category} report from ${finalLocation.address}: ${description}`,
+            timestamp,
+          },
+          {
+            id: `context_${crisisId}`,
+            source: 'Reporter Metadata',
+            text: `Severity ${severity}/5. Coordinates ${finalLocation.lat.toFixed(4)}, ${finalLocation.lng.toFixed(4)}.`,
+            timestamp,
+          },
+        ],
+        {
+          crisisId,
+          category,
+          description,
+          severity,
+          location: finalLocation,
+          photoUri,
+          timestamp,
         }
-      }
+      );
 
-      console.log(`Sending signal to API: ${API_URL}`);
+      const crisisStore = useCrisisStore.getState();
+      const agentStore = useAgentStore.getState();
 
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signal })
-      });
+      crisisStore.upsertCrisis(result.crisis);
+      crisisStore.setResponsePlan(result.plan);
+      crisisStore.setSelectedCrisis(result.crisis.id);
+      crisisStore.markRecentlySubmitted(result.crisis.id);
+      agentStore.replaceLog(result.agentLog);
+      agentStore.setPipelineStatus('complete');
 
-      if (!response.ok) {
-        throw new Error(`Server returned status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.success && data.full_trace) {
-        const analyst = data.full_trace.analystOutput || {};
-        
-        // Helper to guess coordinates from text
-        const getCoords = (text: string) => {
-          const t = text.toLowerCase();
-          if (t.includes('g-10') || t.includes('g10')) return { lat: 33.6844, lng: 73.0479 };
-          if (t.includes('f-8') || t.includes('f8')) return { lat: 33.7104, lng: 73.0384 };
-          if (t.includes('blue area')) return { lat: 33.7087, lng: 73.0697 };
-          if (t.includes('faizabad')) return { lat: 33.6391, lng: 73.0850 };
-          if (t.includes('murree') || t.includes('muree')) return { lat: 33.7294, lng: 73.1200 };
-          if (t.includes('highway')) return { lat: 33.6550, lng: 73.0800 };
-          if (t.includes('i-8') || t.includes('i8')) return { lat: 33.6685, lng: 73.0744 };
-          // Random offset around Islamabad center for unknown locations
-          return {
-            lat: 33.6844 + (Math.random() - 0.5) * 0.05,
-            lng: 73.0479 + (Math.random() - 0.5) * 0.05
-          };
-        };
-
-        const newCrisis: Crisis = {
-          id: Date.now().toString(),
-          type: 'Emergency',
-          location: signal, 
-          severity: analyst.impact || 'HIGH',
-          confidence_score: analyst.confidence_level || 0.9,
-          affected_area_km2: 2.5,
-          estimated_affected_people: 50,
-          reasoning: data.final_state?.reasoning || 'AI Orchestrator confirmed the emergency.',
-          corroborating_signals: [signal],
-          coordinates: getCoords(signal)
-        };
-        addCrisis([...currentCrises, newCrisis]);
-        Alert.alert('Signal Processed', 'The AI Orchestrator has analyzed the crisis and dispatched units. Check the Map for live updates.');
-        setSignal(''); // clear input
-      }
-    } catch (error: any) {
-      console.error('API Error:', error);
+      resetForm();
+      router.replace('/(tabs)/index');
+    } catch {
+      useAgentStore.getState().setPipelineStatus('failed');
       Alert.alert(
-        'Network Error',
-        `Could not connect to the backend server.\n\nMake sure the Node server is running on port 3000.\n\nDetails: ${error.message}`
+        'Submission Error',
+        'The crisis pipeline did not finish this time. Please retry the report flow.'
       );
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 24 }}>
-      <Text style={styles.header}>Dispatcher Dashboard</Text>
-      <Text style={styles.subtext}>Ingest localized multi-source signals into the CIRO Antigravity Engine.</Text>
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.container}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <Text style={styles.kicker}>Role 3 | Mobile Intake</Text>
+            <Text style={styles.title}>Report Crisis</Text>
+            <Text style={styles.subtitle}>
+              Turn noisy field input into a clean incident that the CIRO agents can analyze, plan, and simulate offline.
+            </Text>
+          </View>
 
-      <View style={styles.inputCard}>
-        <Text style={styles.label}>Incoming Signal / Social Feed</Text>
-        <TextInput
-          style={styles.textArea}
-          placeholder='e.g., "G-10 mein pani bhar gaya hai, traffic is stuck!"'
-          placeholderTextColor="#64748b"
-          multiline
-          numberOfLines={4}
-          value={signal}
-          onChangeText={setSignal}
-        />
-        
-        <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Trigger Response Workflow</Text>
-          )}
-        </TouchableOpacity>
+          <View style={styles.stepper}>
+            {STEP_LABELS.map((label, index) => {
+              const isActive = index === stepIndex;
+              const isDone = index < stepIndex;
+              return (
+                <View key={label} style={styles.stepItem}>
+                  <View
+                    style={[
+                      styles.stepDot,
+                      {
+                        backgroundColor: isActive || isDone ? ROLE3_COLORS.accent : ROLE3_COLORS.surfaceSoft,
+                        borderColor: isActive ? ROLE3_COLORS.accentSoft : ROLE3_COLORS.borderStrong,
+                      },
+                    ]}>
+                    <Text style={styles.stepDotText}>{index + 1}</Text>
+                  </View>
+                  <Text style={[styles.stepLabel, { color: isActive ? ROLE3_COLORS.text : ROLE3_COLORS.textMuted }]}>
+                    {label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.card}>
+            {stepIndex === 0 ? (
+              <>
+                <Text style={styles.cardTitle}>Choose incident category</Text>
+                <Text style={styles.cardBody}>
+                  Start with the crisis type so downstream agents can route the report to the right response pattern.
+                </Text>
+                <View style={styles.categoryGrid}>
+                  {CATEGORY_OPTIONS.map((option) => {
+                    const isSelected = category === option.value;
+                    return (
+                      <Pressable
+                        key={option.value}
+                        style={[
+                          styles.categoryTile,
+                          isSelected && {
+                            borderColor: ROLE3_COLORS.accentSoft,
+                            backgroundColor: 'rgba(59, 130, 246, 0.16)',
+                          },
+                        ]}
+                        onPress={() => setCategory(option.value)}>
+                        <Ionicons
+                          name={option.icon as never}
+                          size={22}
+                          color={isSelected ? ROLE3_COLORS.accentSoft : ROLE3_COLORS.textSoft}
+                        />
+                        <Text style={styles.categoryLabel}>{option.label}</Text>
+                        <Text style={styles.categoryHelper}>{option.helper}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+
+            {stepIndex === 1 ? (
+              <>
+                <Text style={styles.cardTitle}>Describe what is happening</Text>
+                <Text style={styles.cardBody}>
+                  Use plain English, Urdu, or Roman Urdu. The mock pipeline is already tuned to handle noisy civic reports.
+                </Text>
+                <TextInput
+                  style={styles.textArea}
+                  value={description}
+                  onChangeText={setDescription}
+                  multiline
+                  placeholder='Example: "G-10 mein pani bhar gaya hai, gaariyan phans gayi hain aur traffic ruk gaya hai."'
+                  placeholderTextColor={ROLE3_COLORS.textMuted}
+                />
+              </>
+            ) : null}
+
+            {stepIndex === 2 ? (
+              <>
+                <Text style={styles.cardTitle}>Attach field photo</Text>
+                <Text style={styles.cardBody}>Optional, but useful when the judges want to see a full report intake flow.</Text>
+                <Pressable style={styles.utilityButton} onPress={handlePickImage} disabled={isPickingImage}>
+                  {isPickingImage ? (
+                    <ActivityIndicator color={ROLE3_COLORS.text} />
+                  ) : (
+                    <>
+                      <Ionicons name="images-outline" size={18} color={ROLE3_COLORS.text} />
+                      <Text style={styles.utilityButtonText}>
+                        {photoUri ? 'Replace attached photo' : 'Choose photo from gallery'}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                {photoUri ? <Image source={{ uri: photoUri }} style={styles.previewImage} /> : null}
+              </>
+            ) : null}
+
+            {stepIndex === 3 ? (
+              <>
+                <Text style={styles.cardTitle}>Capture location</Text>
+                <Text style={styles.cardBody}>
+                  Autofill using device coordinates, then adjust the address manually if the reverse lookup needs a cleaner label.
+                </Text>
+                <Pressable style={styles.utilityButton} onPress={handleLocate} disabled={isLocating}>
+                  {isLocating ? (
+                    <ActivityIndicator color={ROLE3_COLORS.text} />
+                  ) : (
+                    <>
+                      <Ionicons name="locate-outline" size={18} color={ROLE3_COLORS.text} />
+                      <Text style={styles.utilityButtonText}>Use current location</Text>
+                    </>
+                  )}
+                </Pressable>
+
+                <TextInput
+                  style={styles.input}
+                  value={location.address}
+                  onChangeText={(address) => setLocation((current) => ({ ...current, address }))}
+                  placeholder="Area, sector, road, landmark"
+                  placeholderTextColor={ROLE3_COLORS.textMuted}
+                />
+                <Text style={styles.helperText}>
+                  Coordinates: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}
+                </Text>
+              </>
+            ) : null}
+
+            {stepIndex === 4 ? (
+              <>
+                <Text style={styles.cardTitle}>Choose severity</Text>
+                <Text style={styles.cardBody}>
+                  This affects the visual urgency of the marker and helps sell the before-vs-after simulation story.
+                </Text>
+                <View style={styles.sliderTrack}>
+                  {[1, 2, 3, 4, 5].map((level) => {
+                    const numericLevel = level as SeverityLevel;
+                    const isSelected = severity === numericLevel;
+                    return (
+                      <Pressable
+                        key={level}
+                        style={[
+                          styles.sliderNode,
+                          {
+                            backgroundColor: getSeverityColor(numericLevel),
+                            transform: [{ scale: isSelected ? 1.08 : 1 }],
+                            borderColor: isSelected ? ROLE3_COLORS.text : 'transparent',
+                          },
+                        ]}
+                        onPress={() => setSeverity(numericLevel)}>
+                        <Text style={styles.sliderNodeText}>{level}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={[styles.severityPreview, { color: getSeverityColor(severity) }]}>
+                  Severity {severity} | {getSeverityLabel(severity)}
+                </Text>
+              </>
+            ) : null}
+
+            {stepIndex === 5 ? (
+              <>
+                <View style={styles.reviewHeader}>
+                  <Text style={styles.cardTitle}>Confirm & submit</Text>
+                  <Pressable onPress={useSampleScenario}>
+                    <Text style={styles.sampleLink}>Use demo sample</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.reviewCard}>
+                  <Text style={styles.reviewTitle}>{category}</Text>
+                  <Text style={styles.reviewText}>{description}</Text>
+                  <Text style={styles.reviewMeta}>Location: {location.address}</Text>
+                  <Text style={styles.reviewMeta}>Severity: {severity} / 5</Text>
+                  <Text style={styles.reviewMeta}>
+                    Photo: {photoUri ? 'Attached' : 'No image attached'}
+                  </Text>
+                </View>
+              </>
+            ) : null}
+          </View>
+
+          <View style={styles.footer}>
+            <Pressable
+              style={[styles.secondaryButton, stepIndex === 0 && styles.disabledButton]}
+              onPress={() => setStepIndex((current) => Math.max(0, current - 1))}
+              disabled={stepIndex === 0 || isSubmitting}>
+              <Text style={styles.secondaryButtonText}>Back</Text>
+            </Pressable>
+
+            {stepIndex < STEP_LABELS.length - 1 ? (
+              <Pressable
+                style={[styles.primaryButton, !canContinue && styles.disabledButton]}
+                onPress={() => setStepIndex((current) => Math.min(STEP_LABELS.length - 1, current + 1))}
+                disabled={!canContinue || isSubmitting}>
+                <Text style={styles.primaryButtonText}>Next step</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                style={[styles.primaryButton, !canContinue && styles.disabledButton]}
+                onPress={handleSubmit}
+                disabled={!canContinue || isSubmitting}>
+                {isSubmitting ? (
+                  <ActivityIndicator color={ROLE3_COLORS.text} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Submit to CIRO</Text>
+                )}
+              </Pressable>
+            )}
+          </View>
+        </ScrollView>
+
+        {isSubmitting ? (
+          <View style={styles.submissionOverlay}>
+            <ActivityIndicator size="large" color={ROLE3_COLORS.accentSoft} />
+            <Text style={styles.overlayTitle}>Coordinating agents...</Text>
+            <Text style={styles.overlayBody}>
+              Normalizing signals, detecting the incident, planning the response, and preparing the simulation.
+            </Text>
+          </View>
+        ) : null}
       </View>
-
-    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  header: { fontSize: 26, fontWeight: 'bold', color: '#f8fafc', marginBottom: 8 },
-  subtext: { fontSize: 14, color: '#94a3b8', marginBottom: 24 },
-  inputCard: { backgroundColor: '#1e293b', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#334155' },
-  label: { color: '#e2e8f0', fontSize: 16, fontWeight: '600', marginBottom: 12 },
-  textArea: {
-    backgroundColor: '#0f172a',
-    color: '#f8fafc',
-    borderRadius: 8,
-    padding: 16,
-    minHeight: 100,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: '#334155',
-    marginBottom: 16
+  flex: {
+    flex: 1,
   },
-  button: { backgroundColor: '#ef4444', padding: 16, borderRadius: 8, alignItems: 'center' }, // red-500 for emergency feel
-  buttonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  resultCard: { marginTop: 24, backgroundColor: '#1e293b', padding: 20, borderRadius: 12, borderWidth: 1, borderColor: '#10b981' },
-  resultHeader: { color: '#10b981', fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  resultText: { color: '#e2e8f0', fontSize: 14, marginBottom: 8, lineHeight: 22 }
+  container: {
+    flex: 1,
+    backgroundColor: ROLE3_COLORS.background,
+  },
+  content: {
+    padding: 20,
+    paddingBottom: 120,
+    gap: 18,
+  },
+  header: {
+    gap: 8,
+    marginTop: 8,
+  },
+  kicker: {
+    color: ROLE3_COLORS.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  title: {
+    color: ROLE3_COLORS.text,
+    fontSize: 30,
+    fontWeight: '800',
+  },
+  subtitle: {
+    color: ROLE3_COLORS.textMuted,
+    lineHeight: 20,
+  },
+  stepper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  stepItem: {
+    alignItems: 'center',
+    gap: 6,
+    minWidth: '15%',
+  },
+  stepDot: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotText: {
+    color: ROLE3_COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  stepLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  card: {
+    backgroundColor: ROLE3_COLORS.surface,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.border,
+    padding: 20,
+    gap: 16,
+  },
+  cardTitle: {
+    color: ROLE3_COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  cardBody: {
+    color: ROLE3_COLORS.textMuted,
+    lineHeight: 20,
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  categoryTile: {
+    width: '48%',
+    backgroundColor: ROLE3_COLORS.surfaceSoft,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.borderStrong,
+    padding: 16,
+    gap: 10,
+  },
+  categoryLabel: {
+    color: ROLE3_COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  categoryHelper: {
+    color: ROLE3_COLORS.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  textArea: {
+    minHeight: 180,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.borderStrong,
+    backgroundColor: ROLE3_COLORS.background,
+    color: ROLE3_COLORS.text,
+    padding: 16,
+    textAlignVertical: 'top',
+  },
+  utilityButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: ROLE3_COLORS.accent,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  utilityButtonText: {
+    color: ROLE3_COLORS.text,
+    fontWeight: '700',
+  },
+  previewImage: {
+    width: '100%',
+    height: 220,
+    borderRadius: 22,
+    marginTop: 8,
+  },
+  input: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.borderStrong,
+    backgroundColor: ROLE3_COLORS.background,
+    color: ROLE3_COLORS.text,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  helperText: {
+    color: ROLE3_COLORS.textMuted,
+    fontSize: 12,
+  },
+  sliderTrack: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  sliderNode: {
+    flex: 1,
+    height: 56,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  sliderNodeText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  severityPreview: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sampleLink: {
+    color: ROLE3_COLORS.accentSoft,
+    fontWeight: '700',
+  },
+  reviewCard: {
+    backgroundColor: ROLE3_COLORS.surfaceSoft,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.border,
+    padding: 16,
+    gap: 10,
+  },
+  reviewTitle: {
+    color: ROLE3_COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  reviewText: {
+    color: ROLE3_COLORS.textSoft,
+    lineHeight: 20,
+  },
+  reviewMeta: {
+    color: ROLE3_COLORS.textMuted,
+    fontSize: 13,
+  },
+  footer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: ROLE3_COLORS.accent,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  primaryButtonText: {
+    color: ROLE3_COLORS.text,
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  secondaryButton: {
+    minWidth: 110,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    backgroundColor: ROLE3_COLORS.surface,
+  },
+  secondaryButtonText: {
+    color: ROLE3_COLORS.text,
+    fontWeight: '700',
+  },
+  disabledButton: {
+    opacity: 0.45,
+  },
+  submissionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 14, 26, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 36,
+    gap: 10,
+  },
+  overlayTitle: {
+    color: ROLE3_COLORS.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  overlayBody: {
+    color: ROLE3_COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
 });

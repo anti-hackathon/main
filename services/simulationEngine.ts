@@ -1,4 +1,4 @@
-import { ResponsePlan, ResponseAction } from '../store/crisisStore';
+import { PlannedAction, ResponsePlan } from '../store/crisisStore';
 import { useAgentStore } from '../store/agentStore';
 
 export interface SimulationMetrics {
@@ -10,7 +10,7 @@ export interface SimulationMetrics {
 
 export interface SimulationTick {
   minute: number;
-  actions: ResponseAction[];
+  actions: PlannedAction[];
   metrics: SimulationMetrics;
 }
 
@@ -61,12 +61,12 @@ export class SimulationEngine {
     this.isRunning = false;
   }
 
-  private computeActionStates(actions: ResponseAction[], minute: number): ResponseAction[] {
+  private computeActionStates(actions: PlannedAction[], minute: number): PlannedAction[] {
     return actions.map(action => {
       let status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' = 'PENDING';
-      if (minute >= action.estimated_time_minutes) {
+      if (minute >= action.estimatedTimeMinutes) {
         status = 'COMPLETED';
-      } else if (minute > 0 && minute < action.estimated_time_minutes) {
+      } else if (minute > 0 && minute < action.estimatedTimeMinutes) {
         status = 'IN_PROGRESS';
       }
       return { ...action, status };

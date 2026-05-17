@@ -1,52 +1,75 @@
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+// Role3 | Enhanced native crisis map with marker interactions, route overlays, and handled-state visuals
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polygon, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useCrisisStore, Crisis } from '../store/crisisStore';
 import { Ionicons } from '@expo/vector-icons';
+import { ROLE3_COLORS, getSeverityColor } from '../constants/role3Theme';
+import { useCrisisStore } from '../store/crisisStore';
 
-export const SimulationMap = ({ simulationMode = false }: { simulationMode?: boolean }) => {
-  const crises = useCrisisStore(state => state.crises);
-  const responsePlan = useCrisisStore(state => state.responsePlan);
+interface SimulationMapProps {
+  simulationMode?: boolean;
+  selectedCrisisId?: string | null;
+  onSelectCrisis?: (crisisId: string) => void;
+}
+
+const buildZone = (lat: number, lng: number, radius = 0.008) => [
+  { latitude: lat + radius, longitude: lng - radius },
+  { latitude: lat + radius * 0.9, longitude: lng + radius * 0.85 },
+  { latitude: lat - radius * 0.65, longitude: lng + radius },
+  { latitude: lat - radius, longitude: lng - radius * 0.75 },
+];
+
+const buildRouteOverlay = (lat: number, lng: number) => ({
+  blocked: [
+    { latitude: lat - 0.006, longitude: lng - 0.012 },
+    { latitude: lat - 0.001, longitude: lng - 0.004 },
+    { latitude: lat + 0.003, longitude: lng + 0.006 },
+    { latitude: lat + 0.008, longitude: lng + 0.011 },
+  ],
+  reroute: [
+    { latitude: lat - 0.006, longitude: lng - 0.012 },
+    { latitude: lat - 0.009, longitude: lng - 0.003 },
+    { latitude: lat - 0.002, longitude: lng + 0.008 },
+    { latitude: lat + 0.008, longitude: lng + 0.011 },
+  ],
+});
+
+export const SimulationMap = ({
+  simulationMode = false,
+  selectedCrisisId,
+  onSelectCrisis,
+}: SimulationMapProps) => {
+  const crises = useCrisisStore((state) => state.crises);
+  const responsePlan = useCrisisStore((state) => state.responsePlan);
+  const responsePlans = useCrisisStore((state) => state.responsePlans);
   const mapRef = useRef<MapView>(null);
 
-  // Default to Islamabad center
-  const initialRegion = {
-    latitude: 33.6844,
-    longitude: 73.0479,
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
-  };
+  const focusedCrisis =
+    crises.find((crisis) => crisis.id === selectedCrisisId) ?? crises[0] ?? null;
 
   useEffect(() => {
-    if (crises.length > 0 && mapRef.current) {
-      const coords = crises.map(c => c.coordinates).filter(Boolean) as {lat:number, lng:number}[];
-      if (coords.length > 0) {
-        mapRef.current.animateToRegion({
-          latitude: coords[0].lat,
-          longitude: coords[0].lng,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        }, 1000);
-      }
+    if (!focusedCrisis || !mapRef.current) {
+      return;
     }
-  }, [crises]);
 
-  const getMarkerColor = (severity: string) => {
-    switch (severity) {
-      case 'CRITICAL': return '#E24B4A'; // red-500
-      case 'HIGH': return '#EF9F27'; // orange-500
-      case 'MEDIUM': return '#378ADD'; // blue-500
-      default: return '#1D9E75'; // teal-500
+    mapRef.current.animateToRegion(
+      {
+        latitude: focusedCrisis.location.lat,
+        longitude: focusedCrisis.location.lng,
+        latitudeDelta: 0.07,
+        longitudeDelta: 0.07,
+      },
+      700
+    );
+  }, [focusedCrisis]);
+
+  const activePlan = useMemo(() => {
+    if (!focusedCrisis) {
+      return responsePlan;
     }
-  };
 
-  // Generate a mock polygon around a center point for visual effect
-  const getPolygonCoords = (center: {lat:number, lng:number}, radius: number = 0.005) => [
-    { latitude: center.lat + radius, longitude: center.lng - radius },
-    { latitude: center.lat + radius, longitude: center.lng + radius },
-    { latitude: center.lat - radius, longitude: center.lng + radius },
-    { latitude: center.lat - radius, longitude: center.lng - radius },
-  ];
+    return responsePlans[focusedCrisis.id] ?? responsePlan;
+  }, [focusedCrisis, responsePlan, responsePlans]);
 
   return (
     <View style={StyleSheet.absoluteFillObject}>
@@ -54,33 +77,83 @@ export const SimulationMap = ({ simulationMode = false }: { simulationMode?: boo
         ref={mapRef}
         provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
         style={StyleSheet.absoluteFillObject}
-        initialRegion={initialRegion}
-        customMapStyle={Platform.OS === 'android' ? mapStyle : undefined}
-      >
+        initialRegion={{
+          latitude: 33.6844,
+          longitude: 73.0479,
+          latitudeDelta: 0.09,
+          longitudeDelta: 0.09,
+        }}
+        customMapStyle={Platform.OS === 'android' ? mapStyle : undefined}>
         {crises.map((crisis) => {
-          if (!crisis.coordinates) return null;
-          const color = getMarkerColor(crisis.severity);
-          
+          const severityColor = getSeverityColor(crisis.severity);
+          const isSelected = crisis.id === selectedCrisisId;
+          const routeOverlay = buildRouteOverlay(crisis.location.lat, crisis.location.lng);
+          const planForCrisis = responsePlans[crisis.id] ?? responsePlan;
+          const showRoutes = simulationMode && planForCrisis?.crisisId === crisis.id;
+
           return (
             <React.Fragment key={crisis.id}>
-              {/* Affected Zone Polygon */}
               <Polygon
-                coordinates={getPolygonCoords(crisis.coordinates, crisis.affected_area_km2 * 0.001)}
-                fillColor={`${color}33`} // 20% opacity
-                strokeColor={color}
-                strokeWidth={2}
+                coordinates={buildZone(
+                  crisis.location.lat,
+                  crisis.location.lng,
+                  Math.max(0.005, (crisis.affectedAreaKm2 ?? 3.2) * 0.0015)
+                )}
+                fillColor={`${severityColor}20`}
+                strokeColor={severityColor}
+                strokeWidth={isSelected ? 2.5 : 1.5}
               />
-              
-              {/* Crisis Marker */}
+
+              {showRoutes ? (
+                <>
+                  <Polyline
+                    coordinates={routeOverlay.blocked}
+                    strokeColor="#EF4444"
+                    strokeWidth={4}
+                    lineDashPattern={[7, 6]}
+                  />
+                  <Polyline
+                    coordinates={routeOverlay.reroute}
+                    strokeColor={ROLE3_COLORS.accent}
+                    strokeWidth={5}
+                  />
+                </>
+              ) : null}
+
               <Marker
-                coordinate={{ latitude: crisis.coordinates.lat, longitude: crisis.coordinates.lng }}
-                title={crisis.type}
-                description={crisis.location}
-              >
-                <View style={[styles.markerWrap]}>
-                  <View style={[styles.ring, { borderColor: color }]} />
-                  <View style={[styles.marker, { backgroundColor: color }]}>
-                    <Ionicons name="warning" size={16} color="white" />
+                coordinate={{
+                  latitude: crisis.location.lat,
+                  longitude: crisis.location.lng,
+                }}
+                title={crisis.title}
+                description={crisis.location.address}
+                onPress={() => onSelectCrisis?.(crisis.id)}>
+                <View style={styles.markerWrap}>
+                  <View
+                    style={[
+                      styles.markerRing,
+                      {
+                        borderColor: simulationMode ? ROLE3_COLORS.accentSoft : severityColor,
+                        width: isSelected ? 58 : 50,
+                        height: isSelected ? 58 : 50,
+                        borderRadius: isSelected ? 29 : 25,
+                        opacity: simulationMode ? 0.35 : 0.52,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.marker,
+                      {
+                        backgroundColor: simulationMode ? ROLE3_COLORS.accent : severityColor,
+                        transform: [{ scale: simulationMode ? 0.98 : 1 }],
+                      },
+                    ]}>
+                    <Ionicons
+                      name={simulationMode ? 'shield-checkmark-outline' : 'warning-outline'}
+                      size={16}
+                      color="#FFFFFF"
+                    />
                   </View>
                 </View>
               </Marker>
@@ -88,27 +161,16 @@ export const SimulationMap = ({ simulationMode = false }: { simulationMode?: boo
           );
         })}
 
-        {/* Alternate Routes from Response Plan */}
-        {simulationMode && responsePlan?.alternate_routes?.map((route, i) => {
-          // Hardcoded coords for demo based on route names (G-10 to F-10 via Nazim-ud-din)
-          const blockedRoute = [
-            { latitude: 33.6844, longitude: 73.0479 },
-            { latitude: 33.6944, longitude: 73.0479 },
-            { latitude: 33.7044, longitude: 73.0279 },
-          ];
-          const newRoute = [
-            { latitude: 33.6844, longitude: 73.0479 },
-            { latitude: 33.6894, longitude: 73.0579 },
-            { latitude: 33.7044, longitude: 73.0279 },
-          ];
-
-          return (
-            <React.Fragment key={i}>
-              <Polyline coordinates={blockedRoute} strokeColor="#E24B4A" strokeWidth={3} lineDashPattern={[8,4]} />
-              <Polyline coordinates={newRoute} strokeColor="#639922" strokeWidth={4} />
-            </React.Fragment>
-          );
-        })}
+        {simulationMode && activePlan?.alternateRoutes.length ? (
+          <Polyline
+            coordinates={buildRouteOverlay(
+              focusedCrisis?.location.lat ?? 33.6844,
+              focusedCrisis?.location.lng ?? 73.0479
+            ).reroute}
+            strokeColor="#22C55E"
+            strokeWidth={5}
+          />
+        ) : null}
       </MapView>
     </View>
   );
@@ -116,51 +178,36 @@ export const SimulationMap = ({ simulationMode = false }: { simulationMode?: boo
 
 const styles = StyleSheet.create({
   markerWrap: {
+    width: 60,
+    height: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    width: 50,
-    height: 50,
   },
-  marker: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ring: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'transparent',
+  markerRing: {
     position: 'absolute',
     borderWidth: 2,
-    opacity: 0.5,
+    backgroundColor: 'transparent',
+  },
+  marker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });
 
-// Subtle dark/grey map style for better contrast with bright markers
 const mapStyle = [
-  {
-    "elementType": "geometry",
-    "stylers": [{"color": "#f5f5f5"}]
-  },
-  {
-    "elementType": "labels.text.fill",
-    "stylers": [{"color": "#616161"}]
-  },
-  {
-    "elementType": "labels.text.stroke",
-    "stylers": [{"color": "#f5f5f5"}]
-  },
-  {
-    "featureType": "road",
-    "elementType": "geometry",
-    "stylers": [{"color": "#ffffff"}]
-  },
-  {
-    "featureType": "water",
-    "elementType": "geometry",
-    "stylers": [{"color": "#c9c9c9"}]
-  }
+  { elementType: 'geometry', stylers: [{ color: '#111827' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#94A3B8' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#111827' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1F2937' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#243042' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0F172A' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#64748B' }] },
 ];

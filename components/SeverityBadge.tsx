@@ -1,22 +1,40 @@
+// Role3 | Numeric severity badge aligned to the dark mobile crisis theme
 import React from 'react';
-import { View, Text } from 'react-native';
-import { Severity } from '../store/crisisStore';
+import { StyleSheet, Text, View } from 'react-native';
+import { getSeverityColor, getSeverityLabel, ROLE3_COLORS } from '../constants/role3Theme';
+import { SeverityLevel } from '../store/crisisStore';
 
-const getSeverityColor = (severity: Severity) => {
-  switch (severity) {
-    case 'CRITICAL': return 'bg-red-500 text-white';
-    case 'HIGH': return 'bg-orange-500 text-white';
-    case 'MEDIUM': return 'bg-blue-500 text-white';
-    case 'LOW': return 'bg-teal-500 text-white';
-    default: return 'bg-gray-500 text-white';
-  }
-};
+interface SeverityBadgeProps {
+  severity: SeverityLevel;
+  compact?: boolean;
+}
 
-export const SeverityBadge = ({ severity }: { severity: Severity }) => {
-  const colorClass = getSeverityColor(severity);
-  return (
-    <View className={`px-2 py-1 rounded-full ${colorClass.split(' ')[0]}`}>
-      <Text className={`text-xs font-bold ${colorClass.split(' ')[1]}`}>{severity}</Text>
-    </View>
-  );
-};
+export const SeverityBadge = ({ severity, compact = false }: SeverityBadgeProps) => (
+  <View
+    style={[
+      styles.badge,
+      {
+        backgroundColor: `${getSeverityColor(severity)}25`,
+        borderColor: `${getSeverityColor(severity)}70`,
+        paddingHorizontal: compact ? 10 : 12,
+        paddingVertical: compact ? 5 : 7,
+      },
+    ]}>
+    <Text style={[styles.label, { color: getSeverityColor(severity) }]}>
+      Sev {severity} | {getSeverityLabel(severity)}
+    </Text>
+  </View>
+);
+
+const styles = StyleSheet.create({
+  badge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: ROLE3_COLORS.text,
+  },
+});

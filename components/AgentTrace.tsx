@@ -1,73 +1,216 @@
+// Role3 | Expandable reasoning card for a single agent step in the crisis workflow
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AgentLog } from '../store/agentStore';
+import { AgentLogStep } from '../store/agentStore';
+import { ROLE3_COLORS } from '../constants/role3Theme';
 
-export const AgentTrace = ({ log }: { log: AgentLog }) => {
-  const [expanded, setExpanded] = useState(false);
+interface AgentTraceProps {
+  step: AgentLogStep;
+  index: number;
+}
 
-  const getStatusColor = () => {
-    switch (log.status) {
-      case 'COMPLETE': return 'bg-green-100 text-green-700 border-green-300';
-      case 'RUNNING': return 'bg-blue-100 text-blue-700 border-blue-300';
-      case 'FAILED': return 'bg-red-100 text-red-700 border-red-300';
-      default: return 'bg-gray-100 text-gray-700 border-gray-300';
-    }
-  };
+const getStatusColors = (status: AgentLogStep['status']) => {
+  switch (status) {
+    case 'COMPLETE':
+      return {
+        chipBg: 'rgba(34, 197, 94, 0.14)',
+        chipBorder: 'rgba(74, 222, 128, 0.35)',
+        chipText: '#4ADE80',
+        icon: 'checkmark-circle-outline',
+      };
+    case 'FAILED':
+      return {
+        chipBg: 'rgba(239, 68, 68, 0.14)',
+        chipBorder: 'rgba(248, 113, 113, 0.35)',
+        chipText: '#F87171',
+        icon: 'warning-outline',
+      };
+    case 'RUNNING':
+      return {
+        chipBg: 'rgba(59, 130, 246, 0.14)',
+        chipBorder: 'rgba(96, 165, 250, 0.35)',
+        chipText: ROLE3_COLORS.accentSoft,
+        icon: 'sync-outline',
+      };
+    default:
+      return {
+        chipBg: 'rgba(148, 163, 184, 0.12)',
+        chipBorder: 'rgba(148, 163, 184, 0.3)',
+        chipText: ROLE3_COLORS.textMuted,
+        icon: 'time-outline',
+      };
+  }
+};
 
-  const statusColor = getStatusColor();
+export const AgentTrace = ({ step, index }: AgentTraceProps) => {
+  const [expanded, setExpanded] = useState(index === 1);
+  const statusColors = getStatusColors(step.status);
 
   return (
-    <View className={`border rounded-xl mb-3 overflow-hidden ${statusColor.split(' ')[2]}`}>
-      <TouchableOpacity 
-        className={`p-4 flex-row justify-between items-center ${statusColor.split(' ')[0]}`}
-        onPress={() => setExpanded(!expanded)}
-      >
-        <View className="flex-row items-center">
-          <Ionicons 
-            name={log.status === 'COMPLETE' ? 'checkmark-circle' : log.status === 'RUNNING' ? 'sync' : 'time'} 
-            size={20} 
-            color={statusColor.split(' ')[1].replace('text-', '')} 
+    <View style={styles.card}>
+      <Pressable style={styles.header} onPress={() => setExpanded((value) => !value)}>
+        <View style={styles.headerLeft}>
+          <View style={styles.indexBubble}>
+            <Text style={styles.indexText}>{index}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.agentName}>{step.agentName}</Text>
+            <Text style={styles.agentAction}>{step.action}</Text>
+          </View>
+        </View>
+
+        <View style={styles.headerRight}>
+          <View
+            style={[
+              styles.statusChip,
+              {
+                backgroundColor: statusColors.chipBg,
+                borderColor: statusColors.chipBorder,
+              },
+            ]}>
+            <Ionicons
+              name={statusColors.icon as never}
+              size={14}
+              color={statusColors.chipText}
+            />
+            <Text style={[styles.statusText, { color: statusColors.chipText }]}>{step.status}</Text>
+          </View>
+          <Ionicons
+            name={expanded ? 'chevron-up-outline' : 'chevron-down-outline'}
+            size={18}
+            color={ROLE3_COLORS.textMuted}
           />
-          <Text className={`font-bold ml-2 ${statusColor.split(' ')[1]}`}>
-            🤖 {log.agentName}
-          </Text>
         </View>
-        <View className="flex-row items-center">
-          {log.durationMs && <Text className={`mr-3 text-xs ${statusColor.split(' ')[1]}`}>{log.durationMs}ms</Text>}
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color="gray" />
-        </View>
-      </TouchableOpacity>
+      </Pressable>
 
-      {expanded && (
-        <View className="p-4 bg-white">
-          <Text className="text-gray-500 text-xs mb-1">Input Summary:</Text>
-          <Text className="text-gray-800 mb-3">{log.inputSummary || 'N/A'}</Text>
-          
-          <Text className="text-gray-500 text-xs mb-1">Output Summary:</Text>
-          <Text className="text-gray-800 mb-3">{log.outputSummary || 'N/A'}</Text>
-          
-          {log.reasoning && log.reasoning.length > 0 && (
-            <>
-              <Text className="text-gray-500 text-xs mb-1">Reasoning:</Text>
-              {log.reasoning.map((r, i) => (
-                <Text key={i} className="text-gray-800 text-sm mb-1">• {r}</Text>
-              ))}
-            </>
-          )}
+      {expanded ? (
+        <View style={styles.body}>
+          <Text style={styles.reasoning}>{step.reasoning}</Text>
 
-          {log.rawJson && (
-            <View className="mt-4 p-3 bg-gray-900 rounded-lg">
-              <Text className="text-gray-400 text-xs mb-2">RAW JSON</Text>
-              <ScrollView horizontal>
-                <Text className="text-green-400 font-mono text-xs">
-                  {JSON.stringify(log.rawJson, null, 2)}
-                </Text>
+          {step.inputSummary ? (
+            <View style={styles.metaBlock}>
+              <Text style={styles.metaLabel}>Input</Text>
+              <Text style={styles.metaValue}>{step.inputSummary}</Text>
+            </View>
+          ) : null}
+
+          {step.outputSummary ? (
+            <View style={styles.metaBlock}>
+              <Text style={styles.metaLabel}>Output</Text>
+              <Text style={styles.metaValue}>{step.outputSummary}</Text>
+            </View>
+          ) : null}
+
+          {step.rawJson ? (
+            <View style={styles.jsonBlock}>
+              <Text style={styles.metaLabel}>Raw JSON</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <Text style={styles.jsonText}>{JSON.stringify(step.rawJson, null, 2)}</Text>
               </ScrollView>
             </View>
-          )}
+          ) : null}
         </View>
-      )}
+      ) : null}
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: ROLE3_COLORS.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: ROLE3_COLORS.border,
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    gap: 12,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    flex: 1,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  indexBubble: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.16)',
+  },
+  indexText: {
+    color: ROLE3_COLORS.accentSoft,
+    fontWeight: '700',
+  },
+  agentName: {
+    color: ROLE3_COLORS.text,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  agentAction: {
+    color: ROLE3_COLORS.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  body: {
+    borderTopWidth: 1,
+    borderTopColor: ROLE3_COLORS.border,
+    padding: 16,
+    gap: 12,
+  },
+  reasoning: {
+    color: ROLE3_COLORS.textSoft,
+    lineHeight: 20,
+  },
+  metaBlock: {
+    gap: 4,
+  },
+  metaLabel: {
+    color: ROLE3_COLORS.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  metaValue: {
+    color: ROLE3_COLORS.text,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  jsonBlock: {
+    gap: 6,
+    backgroundColor: '#030712',
+    borderRadius: 16,
+    padding: 12,
+  },
+  jsonText: {
+    color: '#4ADE80',
+    fontSize: 11,
+    fontFamily: 'monospace',
+  },
+});

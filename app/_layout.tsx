@@ -44,6 +44,8 @@ export default function RootLayout() {
   return <RootLayoutNav />;
 }
 
+import { NotificationToast } from '../components/NotificationToast';
+
 function RootLayoutNav() {
   return (
     <ThemeProvider value={DarkTheme}>
@@ -51,6 +53,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
+      <NotificationToast />
     </ThemeProvider>
   );
 }

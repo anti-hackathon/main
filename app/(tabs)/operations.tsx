@@ -5,8 +5,11 @@ import { CrisisCard } from '../../components/CrisisCard';
 import { ROLE3_COLORS } from '../../constants/role3Theme';
 import { useAgentStore } from '../../store/agentStore';
 import { useCrisisStore } from '../../store/crisisStore';
+import { useUserStore } from '../../store/userStore';
 
 export default function OperationsScreen() {
+  const role = useUserStore((state) => state.role);
+  const isAdmin = role === 'admin';
   const crises = useCrisisStore((state) => state.crises);
   const responsePlan = useCrisisStore((state) => state.responsePlan);
   const logs = useAgentStore((state) => state.logs);
@@ -56,7 +59,14 @@ export default function OperationsScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Latest Agent Decisions</Text>
-        {latestSteps.length === 0 ? (
+        {!isAdmin ? (
+          <View style={styles.emptyCard}>
+            <Text style={[styles.emptyTitle, { color: '#94a3b8' }]}>🔒 Clearance Restricted</Text>
+            <Text style={styles.emptyText}>
+              Dispatcher agent reasoning cycles and neural pipeline telemetries are restricted to Admin accounts.
+            </Text>
+          </View>
+        ) : latestSteps.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>No trace available yet</Text>
             <Text style={styles.emptyText}>Once the mock pipeline runs, the latest reasoning steps will land here.</Text>

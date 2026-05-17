@@ -1,5 +1,5 @@
 // Role3 | Upgraded the signal form into a full multi-step crisis report flow wired to the mock agent pipeline
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,6 +30,8 @@ import { runCIROPipeline } from '../../server/model';
 import { useCrisisStore } from '../../store/crisisStore';
 import { useAgentStore } from '../../store/agentStore';
 
+import { useToastStore } from '../../store/toastStore';
+
 const STEP_LABELS = ['Category', 'Details', 'Photo', 'Location', 'Severity', 'Review'];
 
 interface DraftLocation {
@@ -41,7 +43,7 @@ interface DraftLocation {
 const DEFAULT_LOCATION: DraftLocation = {
   lat: 33.6844,
   lng: 73.0479,
-  address: 'G-10 Markaz, Islamabad',
+  address: '', // Default to empty to trigger auto-location geocoding
 };
 
 export default function ReportCrisisScreen() {
@@ -55,6 +57,13 @@ export default function ReportCrisisScreen() {
   const [isPickingImage, setIsPickingImage] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Auto-trigger GPS location capture as soon as Step 3 is loaded
+  useEffect(() => {
+    if (stepIndex === 3 && !location.address) {
+      handleLocate();
+    }
+  }, [stepIndex]);
 
   const canContinue = useMemo(() => {
     switch (stepIndex) {
@@ -87,7 +96,11 @@ export default function ReportCrisisScreen() {
     setDescription(
       'Flash flooding is building near G-10 Markaz. Cars are stalled in standing water and traffic is no longer moving.'
     );
-    setLocation(DEFAULT_LOCATION);
+    setLocation({
+      lat: 33.6844,
+      lng: 73.0479,
+      address: 'G-10 Markaz, Islamabad',
+    });
     setSeverity(5);
     setStepIndex(5);
   };
@@ -97,7 +110,7 @@ export default function ReportCrisisScreen() {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Photo Permission', 'Allow photo access to attach a field image to the report.');
+        useToastStore.getState().showToast('Allow library permission to attach field photos.', 'error', 'PHOTO PERMISSION');
         return;
       }
 
@@ -109,9 +122,10 @@ export default function ReportCrisisScreen() {
 
       if (!result.canceled && result.assets.length > 0) {
         setPhotoUri(result.assets[0].uri);
+        useToastStore.getState().showToast('Incident photo attached to dispatcher cache.', 'success', 'IMAGE CACHED');
       }
     } catch {
-      Alert.alert('Photo Error', 'The image picker could not open right now.');
+      useToastStore.getState().showToast('The image picker could not open right now.', 'error', 'UTILITY FAILED');
     } finally {
       setIsPickingImage(false);
     }
@@ -122,7 +136,7 @@ export default function ReportCrisisScreen() {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Location Permission', 'Allow location access or type the area manually.');
+        useToastStore.getState().showToast('GPS permission denied. Please type address manually.', 'error', 'LOCATION DENIED');
         return;
       }
 
@@ -139,18 +153,16 @@ export default function ReportCrisisScreen() {
         ? [reverse[0].name, reverse[0].district, reverse[0].city, reverse[0].region].filter(Boolean)
         : [];
 
+      const resolvedAddress = addressParts.join(', ') || formatAddressFallback(current.coords.latitude, current.coords.longitude);
+
       setLocation({
         lat: current.coords.latitude,
         lng: current.coords.longitude,
-        address:
-          addressParts.join(', ') ||
-          formatAddressFallback(current.coords.latitude, current.coords.longitude),
+        address: resolvedAddress,
       });
+      useToastStore.getState().showToast('Live device coordinates resolved successfully!', 'success', 'GPS LOCATION RETRIEVED');
     } catch {
-      Alert.alert(
-        'Location Error',
-        'Current location could not be resolved. You can still type the address manually.'
-      );
+      useToastStore.getState().showToast('Could not resolve GPS location. Please type manually or toggle device GPS.', 'error', 'LOCATION SERVICES OFF');
     } finally {
       setIsLocating(false);
     }
@@ -257,16 +269,14 @@ export default function ReportCrisisScreen() {
       agentStore.setAntigravityCoreStatus('done');
 
       resetForm();
+      useToastStore.getState().showToast('Incident response plan generated and deployed to live map!', 'success', 'PLAN DISPATCHED');
       router.replace('/');
     } catch (err: any) {
       console.error('[Antigravity Dashboard] submission handler caught error:', err);
       const agentStoreErr = useAgentStore.getState();
       agentStoreErr.setPipelineStatus('failed');
       agentStoreErr.setAntigravityCoreStatus('failed');
-      Alert.alert(
-        'Submission Error',
-        `The crisis pipeline did not finish: ${err.message || err}`
-      );
+      useToastStore.getState().showToast(`Response planning failed: ${err.message || err}`, 'error', 'PIPELINE FAILURE');
     } finally {
       setIsSubmitting(false);
     }

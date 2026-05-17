@@ -9,6 +9,7 @@ import {
   getCrisisStatusIndex,
 } from '../constants/role3Theme';
 import { Crisis, ResponsePlan } from '../store/crisisStore';
+import { useUserStore } from '../store/userStore';
 import { SeverityBadge } from './SeverityBadge';
 import { SlidingSheet } from './SlidingSheet';
 
@@ -29,6 +30,9 @@ export const IncidentDetailSheet = ({
   plan,
   onViewReasoning,
 }: IncidentDetailSheetProps) => {
+  const role = useUserStore((state) => state.role);
+  const isAdmin = role === 'admin';
+
   if (!crisis) {
     return (
       <SlidingSheet visible={visible} onClose={onClose} title="Incident Detail">
@@ -116,10 +120,17 @@ export const IncidentDetailSheet = ({
           </View>
         </View>
 
-        <Pressable style={styles.reasoningButton} onPress={onViewReasoning}>
-          <Ionicons name="sparkles-outline" size={16} color={ROLE3_COLORS.text} />
-          <Text style={styles.reasoningButtonText}>View AI Reasoning</Text>
-        </Pressable>
+        {isAdmin ? (
+          <Pressable style={styles.reasoningButton} onPress={onViewReasoning}>
+            <Ionicons name="sparkles-outline" size={16} color={ROLE3_COLORS.text} />
+            <Text style={styles.reasoningButtonText}>View AI Reasoning</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.disabledReasoningButton}>
+            <Ionicons name="lock-closed-outline" size={16} color={ROLE3_COLORS.textMuted} />
+            <Text style={styles.disabledReasoningButtonText}>View AI Reasoning (Admin Clearance Required)</Text>
+          </View>
+        )}
       </ScrollView>
     </SlidingSheet>
   );
@@ -241,6 +252,24 @@ const styles = StyleSheet.create({
     color: ROLE3_COLORS.text,
     fontWeight: '700',
     fontSize: 14,
+  },
+  disabledReasoningButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: ROLE3_COLORS.surface,
+    borderColor: ROLE3_COLORS.borderStrong,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingVertical: 14,
+    marginTop: 4,
+    opacity: 0.65,
+  },
+  disabledReasoningButtonText: {
+    color: ROLE3_COLORS.textMuted,
+    fontWeight: '600',
+    fontSize: 13,
   },
   emptyCard: {
     backgroundColor: ROLE3_COLORS.surfaceSoft,
